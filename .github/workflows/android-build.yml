@@ -41,11 +41,28 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # runner 镜像已预装 Android SDK（ANDROID_HOME / sdkmanager 在 PATH）。
-      # 不用 android-actions/setup-android@v3：该 action 在当前环境 5 秒即失败。
-      # 此处仅接受 licenses，缺失的 platform / build-tools 由 AGP 构建时自动下载。
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses > /dev/null
+      # 不用 android-actions/setup-android@v3：2026-09 起该 action 默认安装
+      # 已从 SDK 仓库移除的 legacy tools 包，必报 "Failed to find package 'tools'"。
+      # runner 镜像的 cmdline-tools 目录名带版本号（非 latest），sdkmanager 不在 PATH，
+      # 故自行定位；未预装则下载 cmdline-tools 兜底，并显式安装编译所需组件。
+      - name: Setup Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "SDK 目录: $SDK"
+          ls "$SDK" || true
+          SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n 1 || true)
+          if [ -z "$SDKM" ]; then
+            echo "sdkmanager 未预装，下载 cmdline-tools..."
+            mkdir -p "$SDK/cmdline-tools"
+            curl -sSL -o /tmp/clt.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            unzip -q /tmp/clt.zip -d /tmp/clt
+            mv /tmp/clt/cmdline-tools "$SDK/cmdline-tools/latest"
+            SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM" --licenses > /dev/null
+          "$SDKM" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
 
       # 优化点 #1：官方 Gradle action，自动缓存 caches / wrapper / build-cache
       - name: Setup Gradle

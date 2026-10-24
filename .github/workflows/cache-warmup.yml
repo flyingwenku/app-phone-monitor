@@ -30,8 +30,20 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses > /dev/null
+      - name: Setup Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n 1 || true)
+          if [ -z "$SDKM" ]; then
+            mkdir -p "$SDK/cmdline-tools"
+            curl -sSL -o /tmp/clt.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            unzip -q /tmp/clt.zip -d /tmp/clt
+            mv /tmp/clt/cmdline-tools "$SDK/cmdline-tools/latest"
+            SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          yes | "$SDKM" --licenses > /dev/null
+          "$SDKM" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
