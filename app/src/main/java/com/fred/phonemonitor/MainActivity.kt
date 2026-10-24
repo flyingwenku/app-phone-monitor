@@ -15,7 +15,7 @@ import com.fred.phonemonitor.core.Metric
 import com.fred.phonemonitor.core.MetricCollector
 import com.fred.phonemonitor.core.MetricUpdateListener
 import com.fred.phonemonitor.sources.BatterySource
-import com.fred.phonemonitor.sources.CpuUsageSource
+import com.fred.phonemonitor.sources.CpuSource
 import com.fred.phonemonitor.sources.DisplaySource
 import com.fred.phonemonitor.sources.MemorySource
 import com.fred.phonemonitor.sources.SensorSource
@@ -57,7 +57,7 @@ class MainActivity : AppCompatActivity() {
         collector = MetricCollector(
             listOf(
                 BatterySource(this),
-                CpuUsageSource(),
+                CpuSource(),
                 MemorySource(this),
                 StorageSource(),
                 DisplaySource(this),

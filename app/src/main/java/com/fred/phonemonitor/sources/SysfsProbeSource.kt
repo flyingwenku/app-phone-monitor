@@ -33,6 +33,11 @@ class SysfsProbeSource : MetricSource {
         add("/sys/class/power_supply/battery/voltage_now")
         add("/sys/class/power_supply/battery/temp")
         add("/sys/class/power_supply/battery/charge_counter")
+        // MTK 平台备用温度路径（荣耀实测 /sys/class/thermal 下无节点）
+        add("/proc/driver/thermal/temperature1")
+        add("/proc/driver/thermal/temperature")
+        add("/sys/class/hwmon/hwmon0/temp1_input")
+        add("/sys/devices/virtual/thermal/thermal_zone0/temp")
     }
 
     override fun read(): List<Metric> = paths.map { path ->

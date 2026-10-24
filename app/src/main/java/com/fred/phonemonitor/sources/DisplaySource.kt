@@ -27,20 +27,40 @@ class DisplaySource(private val context: Context) : MetricSource {
                 "display_density", "显示缩放",
                 String.format(Locale.getDefault(), "%.2f", metrics.density)
             ),
-            Metric("display_refresh", "刷新率", readRefreshRate())
+            Metric("display_refresh", "当前刷新率", readCurrentRefreshRate()),
+            Metric("display_modes", "支持的刷新率", readSupportedRefreshRates())
         )
     }
 
-    private fun readRefreshRate(): String {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "需 Android 6+"
+    private fun readCurrentRefreshRate(): String {
+        val display = defaultDisplay() ?: return "—"
+        val rate = display.refreshRate
+        return if (rate > 0f) String.format(Locale.getDefault(), "%.1f Hz", rate) else "—"
+    }
+
+    /**
+     * refreshRate 只报当前模式（60Hz 屏跑 90Hz 模式时会误判），
+     * 完整能力要看 supportedModes。
+     */
+    private fun readSupportedRefreshRates(): String {
+        val display = defaultDisplay() ?: return "—"
         return try {
-            val manager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
-            val display = manager?.getDisplay(Display.DEFAULT_DISPLAY)
-            val rate = display?.refreshRate
-            if (rate != null && rate > 0f) String.format(Locale.getDefault(), "%.1f Hz", rate)
-            else "—"
+            val rates = display.supportedModes
+                .map { it.refreshRate }
+                .map { (it * 10).toInt() / 10f }
+                .distinct()
+                .sorted()
+            if (rates.isEmpty()) "—"
+            else rates.joinToString(" / ") { String.format(Locale.getDefault(), "%.1f", it) } + " Hz"
         } catch (e: Exception) {
             "—"
         }
+    }
+
+    private fun defaultDisplay(): Display? = try {
+        (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+            ?.getDisplay(Display.DEFAULT_DISPLAY)
+    } catch (e: Exception) {
+        null
     }
 }
