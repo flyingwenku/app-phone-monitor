@@ -41,8 +41,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # runner 镜像已预装 Android SDK（ANDROID_HOME / sdkmanager 在 PATH）。
+      # 不用 android-actions/setup-android@v3：该 action 在当前环境 5 秒即失败。
+      # 此处仅接受 licenses，缺失的 platform / build-tools 由 AGP 构建时自动下载。
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null
 
       # 优化点 #1：官方 Gradle action，自动缓存 caches / wrapper / build-cache
       - name: Setup Gradle
