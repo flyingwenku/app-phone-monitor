@@ -1,15 +1,5 @@
 <resources>
     <string name="app_name">Phone Monitor</string>
-
-    <string name="device_info">%1$s %2$s  ·  Android %3$s (API %4$d)</string>
-    <string name="updated_at">更新于 %1$s</string>
-    <string name="placeholder">—</string>
-
-    <string name="label_battery_temp">电池温度</string>
-    <string name="label_battery_level">电量</string>
-    <string name="label_battery_voltage">电压</string>
-    <string name="label_battery_current">电流</string>
-    <string name="label_battery_health">健康状态</string>
-    <string name="label_battery_status">充电状态</string>
-    <string name="label_battery_tech">电池类型</string>
+    <string name="keep_screen_on">保持常亮</string>
+    <string name="status_default">常亮：初始化中</string>
 </resources>

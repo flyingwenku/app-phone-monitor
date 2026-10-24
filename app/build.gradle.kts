@@ -55,4 +55,10 @@ dependencies {
     // 每增加一个库 = 编译时间 + dex 时间增加。
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
+
+    // UI 基础设施：5 个数据分区需要可滑动切换的 Tab 与长列表，
+    // 属于必需项（非可选功能）。后续若只需单页可移除这三个依赖。
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.viewpager2:viewpager2:1.1.0")
+    implementation("com.google.android.material:material:1.12.0")
 }

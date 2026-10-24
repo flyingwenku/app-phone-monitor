@@ -1,44 +1,51 @@
 package com.fred.phonemonitor
 
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import kotlin.math.abs
+import androidx.viewpager2.widget.ViewPager2
+import com.fred.phonemonitor.core.Metric
+import com.fred.phonemonitor.core.MetricCollector
+import com.fred.phonemonitor.core.MetricUpdateListener
+import com.fred.phonemonitor.sources.BatterySource
+import com.fred.phonemonitor.sources.CpuUsageSource
+import com.fred.phonemonitor.sources.DisplaySource
+import com.fred.phonemonitor.sources.MemorySource
+import com.fred.phonemonitor.sources.SensorSource
+import com.fred.phonemonitor.sources.StorageSource
+import com.fred.phonemonitor.sources.SysfsProbeSource
+import com.fred.phonemonitor.sources.ThermalStatusSource
+import com.fred.phonemonitor.ui.MonitorPagerAdapter
+import com.fred.phonemonitor.ui.TabSpec
+import com.google.android.material.switchmaterial.SwitchMaterial
+import com.google.android.material.tabs.TabLayout
+import com.google.android.material.tabs.TabLayoutMediator
 
-/**
- * 阶段 0 + 1：验证流水线可出包，并采集电池核心数据。
- *
- * 说明：电池温度是本应用唯一能稳定拿到「具体摄氏度」的温度指标。
- * CPU 温度在 Android 10+ 上受 SELinux 限制无法读取，后续由
- * ThermalStatusSource（热状态等级）+ SysfsProbeSource（实证探测）覆盖。
- */
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var collector: MetricCollector
     private val handler = Handler(Looper.getMainLooper())
-    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    private val listeners = mutableListOf<MetricUpdateListener>()
 
-    private lateinit var tvTemp: TextView
-    private lateinit var tvLevel: TextView
-    private lateinit var tvVoltage: TextView
-    private lateinit var tvCurrent: TextView
-    private lateinit var tvHealth: TextView
+    private lateinit var switchKeepScreen: SwitchMaterial
     private lateinit var tvStatus: TextView
-    private lateinit var tvTech: TextView
-    private lateinit var tvDevice: TextView
-    private lateinit var tvUpdated: TextView
+
+    /** 最近一次采集结果，供新创建的 Fragment 立即填充 */
+    var lastData: Map<String, List<Metric>> = emptyMap()
+        private set
 
     private val ticker = object : Runnable {
         override fun run() {
-            refresh()
+            lastData = collector.readAll()
+            listeners.toList().forEach { it.onMetricsUpdated(lastData) }
+            applyKeepScreen()
             handler.postDelayed(this, REFRESH_INTERVAL_MS)
         }
     }
@@ -46,8 +53,44 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        bindViews()
-        showDeviceInfo()
+
+        collector = MetricCollector(
+            listOf(
+                BatterySource(this),
+                CpuUsageSource(),
+                MemorySource(this),
+                StorageSource(),
+                DisplaySource(this),
+                ThermalStatusSource(this),
+                SensorSource(this),
+                SysfsProbeSource()
+            )
+        )
+
+        switchKeepScreen = findViewById(R.id.switchKeepScreen)
+        tvStatus = findViewById(R.id.tvStatus)
+
+        setupTabs()
+
+        switchKeepScreen.setOnCheckedChangeListener { _, _ -> applyKeepScreen() }
+    }
+
+    private fun setupTabs() {
+        val tabs = listOf(
+            TabSpec("概览", listOf("battery", "cpu", "memory", "thermal")),
+            TabSpec("电池", listOf("battery")),
+            TabSpec("系统", listOf("cpu", "memory", "storage", "display")),
+            TabSpec("热与传感器", listOf("thermal", "sensors")),
+            TabSpec("探测", listOf("probe"))
+        )
+
+        val pager = findViewById<ViewPager2>(R.id.pager)
+        pager.adapter = MonitorPagerAdapter(this, tabs)
+
+        val tabLayout = findViewById<TabLayout>(R.id.tabs)
+        TabLayoutMediator(tabLayout, pager) { tab, position ->
+            tab.text = tabs[position].title
+        }.attach()
     }
 
     override fun onResume() {
@@ -57,94 +100,58 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         handler.removeCallbacks(ticker)
+        // 离开前台时主动释放，避免后台耗电
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         super.onPause()
     }
 
-    private fun bindViews() {
-        tvTemp = findViewById(R.id.tvTemp)
-        tvLevel = findViewById(R.id.tvLevel)
-        tvVoltage = findViewById(R.id.tvVoltage)
-        tvCurrent = findViewById(R.id.tvCurrent)
-        tvHealth = findViewById(R.id.tvHealth)
-        tvStatus = findViewById(R.id.tvStatus)
-        tvTech = findViewById(R.id.tvTech)
-        tvDevice = findViewById(R.id.tvDevice)
-        tvUpdated = findViewById(R.id.tvUpdated)
+    fun addListener(listener: MetricUpdateListener) {
+        listeners.add(listener)
     }
 
-    private fun showDeviceInfo() {
-        tvDevice.text = getString(
-            R.string.device_info,
-            Build.MANUFACTURER,
-            Build.MODEL,
-            Build.VERSION.RELEASE,
-            Build.VERSION.SDK_INT
-        )
+    fun removeListener(listener: MetricUpdateListener) {
+        listeners.remove(listener)
     }
 
-    private fun refresh() {
-        // ACTION_BATTERY_CHANGED 是 sticky 广播，传 null receiver 即可取回最近一次值
+    /**
+     * 常亮控制：使用 FLAG_KEEP_SCREEN_ON（官方推荐，无需任何权限）。
+     * 仅在 app 前台有效——用户锁屏后系统依然会熄屏，这是 Android 的安全设计。
+     * 触发条件：用户开关打开 且（正在充电 或 电量不低于阈值）。
+     */
+    private fun applyKeepScreen() {
+        val userEnabled = switchKeepScreen.isChecked
+        val batteryOk = batteryOkForKeep()
+        val active = userEnabled && batteryOk
+
+        if (active) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+
+        tvStatus.text = when {
+            !userEnabled -> "常亮：已关闭"
+            !batteryOk -> "常亮：已暂停（电量低于 ${KEEP_SCREEN_MIN_BATTERY}% 且未充电）"
+            else -> "常亮：生效中"
+        }
+    }
+
+    private fun batteryOkForKeep(): Boolean {
         val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            ?: return
+            ?: return true
 
-        val tempRaw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
-        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-        val voltageMv = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
-        val health = intent.getIntExtra(BatteryManager.EXTRA_HEALTH, -1)
-        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-        val tech = intent.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY).orEmpty()
+        // 只要接了任何外部电源（USB / 交流电 / 无线）就常亮
+        val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+        if (plugged != 0) return true
 
-        tvTemp.text = if (tempRaw == Int.MIN_VALUE) NA
-        else String.format(Locale.getDefault(), "%.1f °C", tempRaw / 10.0)
-
-        tvLevel.text = if (level < 0 || scale <= 0) NA
-        else String.format(Locale.getDefault(), "%d%%  (%d / %d)", level * 100 / scale, level, scale)
-
-        tvVoltage.text = if (voltageMv < 0) NA
-        else String.format(Locale.getDefault(), "%.3f V", voltageMv / 1000.0)
-
-        tvCurrent.text = readCurrent()
-        tvHealth.text = describeHealth(health)
-        tvStatus.text = describeStatus(status)
-        tvTech.text = tech.ifBlank { NA }
-
-        tvUpdated.text = getString(R.string.updated_at, timeFormat.format(Date()))
-    }
-
-    /** 瞬时电流（µA）。正值 = 充电，负值 = 放电。 */
-    private fun readCurrent(): String {
-        val manager = getSystemService(BATTERY_SERVICE) as? BatteryManager ?: return NA
-        val microAmps = manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-        if (microAmps == Int.MIN_VALUE) return NA
-
-        val milliAmps = microAmps / 1000.0
-        val direction = if (milliAmps > 0) "充电" else "放电"
-        return String.format(Locale.getDefault(), "%.0f mA (%s)", abs(milliAmps), direction)
-    }
-
-    private fun describeHealth(health: Int): String = when (health) {
-        BatteryManager.BATTERY_HEALTH_UNKNOWN -> "未知"
-        BatteryManager.BATTERY_HEALTH_GOOD -> "良好"
-        BatteryManager.BATTERY_HEALTH_OVERHEAT -> "过热"
-        BatteryManager.BATTERY_HEALTH_DEAD -> "损坏"
-        BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "过压"
-        BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "未指定故障"
-        BatteryManager.BATTERY_HEALTH_COLD -> "过冷"
-        else -> NA
-    }
-
-    private fun describeStatus(status: Int): String = when (status) {
-        BatteryManager.BATTERY_STATUS_CHARGING -> "充电中"
-        BatteryManager.BATTERY_STATUS_DISCHARGING -> "放电中"
-        BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "未充电"
-        BatteryManager.BATTERY_STATUS_FULL -> "已充满"
-        BatteryManager.BATTERY_STATUS_UNKNOWN -> "未知"
-        else -> NA
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 100)
+        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+        val percent = if (scale > 0) level * 100 / scale else 100
+        return percent >= KEEP_SCREEN_MIN_BATTERY
     }
 
     companion object {
         private const val REFRESH_INTERVAL_MS = 1000L
-        private const val NA = "—"
+        private const val KEEP_SCREEN_MIN_BATTERY = 20
     }
 }
