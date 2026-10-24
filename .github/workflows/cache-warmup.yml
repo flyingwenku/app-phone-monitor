@@ -16,7 +16,8 @@ concurrency:
 jobs:
   warmup:
     name: Warm Gradle Cache
-    runs-on: ubuntu-latest
+    # 固定 24.04，原因同 android-build.yml
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -24,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
