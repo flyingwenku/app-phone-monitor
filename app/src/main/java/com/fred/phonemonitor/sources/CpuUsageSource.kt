@@ -49,8 +49,16 @@ class CpuUsageSource : MetricSource {
     }
 
     /** 返回 (总时间片, 空闲时间片)，失败返回 null。 */
-    private fun readStat(): Pair<Long, Long>? = try {
-        val line = File("/proc/stat").bufferedReader().use { it.readLine() } ?: return null
+    private fun readStat(): Pair<Long, Long>? {
+        // 注意：不能用表达式函数体（= try {...}），否则其中的 return 会编译报错
+        val line: String? = try {
+            File("/proc/stat").bufferedReader().use { it.readLine() }
+        } catch (e: Exception) {
+            return null
+        }
+
+        if (line.isNullOrEmpty()) return null
+
         val parts = line.trim().split(Regex("\\s+"))
         if (parts.isEmpty() || !parts[0].startsWith("cpu")) return null
 
@@ -60,8 +68,6 @@ class CpuUsageSource : MetricSource {
         }
         // 索引 4 = idle，索引 5 = iowait
         val idle = (parts.getOrNull(4)?.toLongOrNull() ?: 0L) + (parts.getOrNull(5)?.toLongOrNull() ?: 0L)
-        total to idle
-    } catch (e: Exception) {
-        null
+        return total to idle
     }
 }
