@@ -30,9 +30,10 @@ else
   fi
 fi
 
-DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
-
-exec "$JAVACMD" $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS \
+# 注意：不要用带引号的 DEFAULT_JVM_OPTS 变量再展开——字面引号会被
+# 原样传给 java 导致 "Unrecognized option" 立即失败（官方脚本靠
+# xargs+eval 解析引号，此处直接省略 wrapper 进程的 JVM 参数）。
+exec "$JAVACMD" $JAVA_OPTS $GRADLE_OPTS \
   -classpath "$CLASSPATH" \
   -Dorg.gradle.appname="gradlew" \
   org.gradle.wrapper.GradleWrapperMain "$@"
